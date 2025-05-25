@@ -160,6 +160,28 @@ app.get('/', (req, res) => {
   res.send('Veritrust BGV Backend is running!');
 });
 
+
+// Admin: Get all candidates
+app.get('/admin/candidates', async (req, res) => {
+  try {
+    const candidates = await Candidate.find().sort({ submittedAt: -1 });
+    res.json({ candidates });
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to fetch candidates' });
+  }
+});
+
+// Admin: Get single candidate full details by ID
+app.get('/admin/candidate/:id', async (req, res) => {
+  try {
+    const candidate = await Candidate.findById(req.params.id);
+    if (!candidate) return res.status(404).json({ error: 'Not found' });
+    res.json(candidate);
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to fetch candidate' });
+  }
+});
+
 // ---- Start Server ----
 app.listen(PORT, () => {
   console.log(`Server running on http://localhost:${PORT}`);
