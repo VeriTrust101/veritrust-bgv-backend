@@ -1,18 +1,31 @@
+// server.js
 const express = require('express');
-const mongoose = require('mongoose');
 const multer = require('multer');
 const xlsx = require('xlsx');
-const { v4: uuidv4 } = require('uuid');
+const uuid = require('uuid').v4;
+const mongoose = require('mongoose');
 const cors = require('cors');
-const bodyParser = require('body-parser');
+const path = require('path');
 
 const app = express();
-app.use(cors());
-app.use(bodyParser.json({ limit: '30mb' })); // for JSON
-app.use(bodyParser.urlencoded({ extended: true, limit: '30mb' })); // for forms
+const PORT = process.env.PORT || 3001;
 
-// MongoDB Candidate model
-const CandidateSchema = new mongoose.Schema({
+// Enable CORS for all origins (update if you want to restrict)
+app.use(cors());
+app.use(express.json({ limit: '20mb' })); // for JSON payloads (photos etc.)
+
+// MongoDB Connection
+mongoose.connect(
+  process.env.MONGODB_URI || 'mongodb://localhost:27017/veritrust', // fallback for local test
+  { useNewUrlParser: true, useUnifiedTopology: true }
+).then(() => {
+  console.log('MongoDB connected!');
+}).catch(err => {
+  console.error('MongoDB connection error:', err);
+});
+
+// Candidate Schema
+const candidateSchema = new mongoose.Schema({
   uniqueToken: String,
   clientName: String,
   subClientName: String,
@@ -26,30 +39,35 @@ const CandidateSchema = new mongoose.Schema({
   city: String,
   state: String,
   status: { type: String, default: 'Pending' },
+  formData: Object,     // The actual form data (after submission)
+  photos: Object,       // base64 + metadata for each photo (after submission)
   submitted: { type: Boolean, default: false },
-  submissionData: { type: Object, default: null }
+  submittedAt: Date
 });
-const Candidate = mongoose.model('Candidate', CandidateSchema);
+const Candidate = mongoose.model('Candidate', candidateSchema);
 
-// Connect to MongoDB Atlas
-mongoose.connect('mongodb+srv://veritrust:Veritrust8800@veritrust-cluster.cjmsmak.mongodb.net/veritrust', {
-  useNewUrlParser: true,
-  useUnifiedTopology: true
-});
-
-// For Excel uploads
+// File upload setup
 const upload = multer({ dest: 'uploads/' });
 
+// ---- Routes ----
+
+// Excel Upload (Admin)
 app.post('/upload-excel', upload.single('excel'), async (req, res) => {
   try {
-    const workbook = xlsx.readFile(req.file.path);
-    const sheetName = workbook.SheetNames[0];
-    const rows = xlsx.utils.sheet_to_json(workbook.Sheets[sheetName]);
+    const file = req.file;
+    if (!file) return res.status(400).json({ error: 'No file uploaded' });
 
-    const newCandidates = [];
+    // Parse Excel
+    const wb = xlsx.readFile(file.path);
+    const ws = wb.Sheets[wb.SheetNames[0]];
+    const rows = xlsx.utils.sheet_to_json(ws);
+
+    // Create candidate records
+    let candidates = [];
     for (let row of rows) {
-      const uniqueToken = uuidv4();
-      const candidate = new Candidate({
+      // Adjust column names as per your Excel
+      const uniqueToken = uuid();
+      const candidate = await Candidate.create({
         uniqueToken,
         clientName: row['Client Name'] || '',
         subClientName: row['Sub Client Name'] || '',
@@ -61,58 +79,88 @@ app.post('/upload-excel', upload.single('excel'), async (req, res) => {
         pincode: row['pincode'] || '',
         areaName: row['Area Name'] || '',
         city: row['City'] || '',
-        state: row['State'] || '',
+        state: row['State'] || ''
       });
-      await candidate.save();
-      newCandidates.push({
+      candidates.push({
         candidateName: candidate.candidateName,
         phoneNumber: candidate.phoneNumber,
-        uniqueLink: `http://localhost:8000/candidate-verify.html?token=${uniqueToken}` // for local demo
+        uniqueLink: `https://earnest-melomakarona-7cf1bf.netlify.app/candidate-verify.html?token=${uniqueToken}`
       });
     }
-    res.status(200).json({ message: "Upload successful", candidates: newCandidates });
-  } catch (error) {
-    res.status(500).json({ error: error.message });
+
+    res.json({ message: 'Upload successful', candidates });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Failed to process file' });
   }
 });
 
-// Fetch candidate by token, prevent if already submitted
+// Get Candidate Data by Token (for pre-fill, login)
 app.get('/candidate/:token', async (req, res) => {
   try {
     const candidate = await Candidate.findOne({ uniqueToken: req.params.token });
-    if (!candidate) {
-      return res.status(404).json({ error: 'Candidate not found' });
-    }
-    if (candidate.submitted) {
+    if (!candidate)
+      return res.status(404).json({ error: 'Candidate not found or invalid link.' });
+    if (candidate.submitted)
       return res.status(403).json({ error: 'Form already submitted' });
-    }
-    res.json(candidate);
-  } catch (error) {
-    res.status(500).json({ error: error.message });
+
+    res.json({
+      clientName: candidate.clientName,
+      subClientName: candidate.subClientName,
+      candidateName: candidate.candidateName,
+      employeeId: candidate.employeeId,
+      phoneNumber: candidate.phoneNumber,
+      alternatePhone: candidate.alternatePhone,
+      address: candidate.address,
+      pincode: candidate.pincode,
+      areaName: candidate.areaName,
+      city: candidate.city,
+      state: candidate.state
+    });
+  } catch (err) {
+    res.status(500).json({ error: 'Internal server error' });
   }
 });
 
-// Save candidate submission and mark as submitted
+// Form Submission + Link Expiry
 app.post('/submit/:token', async (req, res) => {
   try {
     const candidate = await Candidate.findOne({ uniqueToken: req.params.token });
-    if (!candidate) {
-      return res.status(404).json({ error: 'Candidate not found' });
-    }
-    if (candidate.submitted) {
+    if (!candidate)
+      return res.status(404).json({ error: 'Candidate not found or invalid link.' });
+    if (candidate.submitted)
       return res.status(403).json({ error: 'Form already submitted' });
+
+    // Save form data and photos (base64)
+    candidate.formData = req.body;
+    candidate.photos = {};
+    for (let i = 1; i <= 6; i++) {
+      if (req.body[`photo${i}`]) {
+        candidate.photos[`photo${i}`] = {
+          image: req.body[`photo${i}`],
+          meta: req.body[`meta${i}`] || ''
+        };
+      }
     }
-    // Save all submitted data and uploaded photos as base64
-    candidate.submissionData = req.body;
     candidate.status = 'Submitted';
     candidate.submitted = true;
+    candidate.submittedAt = new Date();
     await candidate.save();
-    res.json({ message: 'Form submitted and link expired.' });
-  } catch (error) {
-    res.status(500).json({ error: error.message });
+
+    res.json({ message: 'Form submitted successfully!' });
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to submit form' });
   }
 });
 
-app.listen(3001, () => {
-  console.log('Server running on http://localhost:3001');
+// --- Static File Serving for Frontend (optional for local dev) ---
+app.use(express.static(path.join(__dirname, 'public')));
+
+app.get('/', (req, res) => {
+  res.send('Veritrust BGV Backend is running!');
+});
+
+// ---- Start Server ----
+app.listen(PORT, () => {
+  console.log(`Server running on http://localhost:${PORT}`);
 });
