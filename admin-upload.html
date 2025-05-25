@@ -1,0 +1,141 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Veritrust Admin - Upload Candidate Excel</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <style>
+    body { background: #f6f9f7; font-family: 'Segoe UI', Arial, sans-serif; margin: 0; }
+    .upload-card {
+      background: #fff;
+      border-radius: 18px;
+      box-shadow: 0 6px 24px #bfd5c3;
+      padding: 32px 32px 24px 32px;
+      max-width: 520px;
+      margin: 56px auto 32px auto;
+    }
+    .logo-bar {text-align:center;margin-bottom:12px;}
+    .logo-bar img {height:54px; border-radius:11px; margin-bottom:2px; box-shadow:0 1px 8px #e3e9e2;}
+    .upload-title {
+      font-size:1.5rem; color:#168550; font-weight:700; letter-spacing:1px; text-align:center; margin-bottom:2px;
+    }
+    .upload-desc {
+      text-align:center; color:#2a2a2a; font-size:1.07em; margin-bottom:18px;
+    }
+    .upload-btn {
+      background: #168550;
+      color: #fff;
+      font-weight: 600;
+      border: none;
+      border-radius: 8px;
+      font-size: 1.13rem;
+      padding: 13px 0;
+      width: 100%;
+      cursor: pointer;
+      margin-top: 8px;
+      box-shadow: 0 2px 10px #d0efdf;
+      transition: background 0.2s;
+      display:block;
+    }
+    .upload-btn:active {background: #11633b;}
+    .upload-status {margin:14px 0 8px 0;}
+    .link-table {width:100%;border-collapse:collapse;margin:18px 0 0 0;}
+    .link-table th, .link-table td {border-bottom:1px solid #e7eae7;padding:7px 5px; font-size:0.99em;}
+    .link-table th {background:#eaf8f2;color:#19524e;text-align:left;}
+    .copy-btn {
+      background: #f1f7f2;
+      border: 1.5px solid #168550;
+      color: #168550;
+      padding: 4px 13px;
+      border-radius: 6px;
+      cursor:pointer;
+      font-size:0.96em;
+      font-weight:600;
+      margin-left:4px;
+      transition:background 0.13s;
+    }
+    .copy-btn:active {background:#d8eddc;}
+    .success-msg {color:#168550;font-weight:600;}
+    .error-msg {color:#b40000;font-weight:600;}
+    @media (max-width:650px) {
+      .upload-card {max-width:98vw;padding:11px 4vw 14px 4vw;}
+      .logo-bar img{height:40px;}
+      .upload-title{font-size:1.08rem;}
+      .link-table th,.link-table td{font-size:0.91em;}
+    }
+  </style>
+</head>
+<body>
+  <div class="upload-card">
+    <div class="logo-bar">
+      <img src="WhatsApp Image 2025-05-22 at 12.56.35_91608a0c.jpg" alt="Veritrust Logo" />
+    </div>
+    <div class="upload-title">VERITRUST Admin Panel</div>
+    <div class="upload-desc">
+      <b>Upload Client Excel Sheet</b> – Each row will generate a unique candidate link.<br>
+      <span style="color:#767676;font-size:0.98em;">Download and use the sample format: <a href="Sample Data .xlsx" style="color:#168550;font-weight:500;text-decoration:underline;">Sample Data .xlsx</a></span>
+    </div>
+    <form id="uploadForm">
+      <input type="file" id="excelFile" accept=".xlsx,.xls" required style="padding:9px;margin-bottom:10px;display:block;width:100%;border-radius:7px;border:1.5px solid #c7d2dd;background:#f6f7f7;">
+      <button type="submit" class="upload-btn">Upload Excel</button>
+    </form>
+    <div class="upload-status" id="status"></div>
+    <div id="links"></div>
+  </div>
+  <script>
+    document.getElementById('uploadForm').onsubmit = async function(e) {
+      e.preventDefault();
+      let status = document.getElementById('status');
+      let linksDiv = document.getElementById('links');
+      status.innerHTML = "";
+      linksDiv.innerHTML = "";
+      const fileInput = document.getElementById('excelFile');
+      if (!fileInput.files[0]) {
+        status.innerHTML = '<span class="error-msg">Please select an Excel file.</span>';
+        return;
+      }
+      status.innerHTML = "Uploading... Please wait.";
+      const formData = new FormData();
+      formData.append("excel", fileInput.files[0]);
+      try {
+        const resp = await fetch("http://localhost:3001/upload-excel", {
+          method: "POST",
+          body: formData
+        });
+        const data = await resp.json();
+        if (resp.ok && data.candidates) {
+          status.innerHTML = `<span class="success-msg">Upload successful! ${data.candidates.length} links generated below.</span>`;
+          let rows = data.candidates.map(c => 
+            `<tr>
+              <td>${c.candidateName}</td>
+              <td>${c.phoneNumber}</td>
+              <td>
+                <input type="text" value="${c.uniqueLink}" id="link-${c.phoneNumber}" style="width:98%;" readonly>
+                <button class="copy-btn" onclick="copyLink('link-${c.phoneNumber}')">Copy</button>
+              </td>
+            </tr>`).join('');
+          linksDiv.innerHTML = `
+            <table class="link-table">
+              <tr>
+                <th>Candidate</th>
+                <th>Phone</th>
+                <th>Unique Link</th>
+              </tr>
+              ${rows}
+            </table>
+          `;
+        } else {
+          status.innerHTML = '<span class="error-msg">Error: ' + (data.error || "Unknown error") + '</span>';
+        }
+      } catch (err) {
+        status.innerHTML = '<span class="error-msg">Upload failed: ' + (err.message || err) + '</span>';
+      }
+    };
+    window.copyLink = function(id) {
+      const el = document.getElementById(id);
+      el.select(); el.setSelectionRange(0, 99999);
+      document.execCommand('copy');
+      el.blur();
+    }
+  </script>
+</body>
+</html>

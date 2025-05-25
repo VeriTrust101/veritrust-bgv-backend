@@ -1,0 +1,452 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <title>Veritrust Candidate Address Verification</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+    <style>
+      body { background: #f6f9f7; font-family: 'Segoe UI', Arial, sans-serif; margin: 0; }
+      #main { min-height: 98vh; display: flex; align-items: center; justify-content: center; }
+      .veritrust-form-card {
+        background: #fff;
+        border-radius: 20px;
+        box-shadow: 0 8px 32px #bfd5c3;
+        padding: 28px 26px 24px 26px;
+        max-width: 470px;
+        margin: 38px auto;
+        width: 100%;
+      }
+      .veritrust-logo {
+        height: 65px;
+        border-radius: 12px;
+        box-shadow: 0 1px 9px #dbe8ee;
+        border: 1.5px solid #168550;
+        margin-bottom: 4px;
+      }
+      .veritrust-title {
+        font-size: 1.6rem;
+        font-weight: 700;
+        color: #168550;
+        margin: 2px 0 4px 0;
+        letter-spacing: 1px;
+      }
+      .veritrust-subtitle {
+        color: #19524e;
+        font-weight: 500;
+        margin-bottom: 8px;
+      }
+      .veritrust-row {
+        display: flex;
+        justify-content: space-between;
+        margin-bottom: 7px;
+      }
+      .veritrust-label {
+        font-weight: 500;
+        color: #1c5250;
+        width: 44%;
+      }
+      .veritrust-value {
+        width: 54%;
+        font-size: 1em;
+        background: #f7fafc;
+        border-radius: 6px;
+        padding: 5px 7px;
+        border: 1px solid #e1e5ea;
+        word-break: break-word;
+      }
+      .veritrust-field {
+        margin-bottom: 12px;
+      }
+      .veritrust-field label {
+        font-weight: 500;
+        color: #1c5250;
+        display: block;
+        margin-bottom: 2px;
+      }
+      .veritrust-field input, .veritrust-field select {
+        width: 100%;
+        padding: 7px 9px;
+        border-radius: 6px;
+        border: 1px solid #c7d2dd;
+        margin-top: 2px;
+        background: #fcfcfd;
+      }
+      .veritrust-hr {
+        border: none;
+        height: 1.5px;
+        background: #e5efe8;
+        margin: 20px 0 14px 0;
+      }
+      .veritrust-photos {
+        margin-bottom: 12px;
+        background: #eaf8f2;
+        border-radius: 8px;
+        padding: 13px 12px;
+      }
+      .veritrust-photo-block {
+        margin-bottom: 9px;
+      }
+      .veritrust-img-preview {
+        width: 115px;
+        margin-top: 6px;
+        border-radius: 8px;
+        display: block;
+        box-shadow: 0 2px 10px #e0f3e6;
+      }
+      .meta-info { font-size:0.93em; color:#168550;}
+      .veritrust-disclaimer {
+        font-size: 0.97em;
+        background: #f8f8f2;
+        border-radius: 8px;
+        padding: 8px 10px;
+        margin-bottom: 16px;
+        display: flex;
+        align-items: center;
+      }
+      .veritrust-disclaimer label {
+        margin-left: 8px;
+      }
+      button#submitBtn {
+        background: #168550;
+        color: #fff;
+        font-size: 1.13rem;
+        font-weight: 700;
+        border: none;
+        border-radius: 8px;
+        padding: 13px 0;
+        width: 100%;
+        cursor: pointer;
+        margin-top: 6px;
+        box-shadow: 0 2px 10px #d0efdf;
+        transition: background 0.2s;
+      }
+      button#submitBtn:disabled {
+        background: #b7c8be;
+        cursor: not-allowed;
+      }
+      /* Login Styling */
+      .veritrust-login-card input {
+        width: 100%;
+        padding: 10px;
+        border-radius: 6px;
+        border: 1px solid #c7d2dd;
+        margin: 0 0 12px 0;
+        background: #fcfcfd;
+        font-size: 1.07rem;
+      }
+      .veritrust-login-card button {
+        background: #2e9158;
+        color: #fff;
+        font-size: 1.17rem;
+        font-weight: 700;
+        border: none;
+        border-radius: 8px;
+        padding: 13px 0;
+        width: 100%;
+        cursor: pointer;
+        margin-top: 8px;
+        box-shadow: 0 2px 10px #d0efdf;
+      }
+      @media (max-width:600px){
+        .veritrust-form-card{max-width:99vw;padding:9px;}
+        .veritrust-logo{height:45px;}
+        .veritrust-title{font-size:1.11rem;}
+        .veritrust-label,.veritrust-value{font-size:0.98em;}
+      }
+    </style>
+  </head>
+  <body>
+    <div id="main">
+      <div style="width:100%;">
+        <div id="content"></div>
+      </div>
+    </div>
+    <script>
+      function getToken() {
+        const params = new URLSearchParams(window.location.search);
+        return params.get('token');
+      }
+
+      async function main() {
+        const token = getToken();
+        if (!token) {
+          document.getElementById('content').innerHTML = `
+            <div class="veritrust-form-card" style="text-align:center;">
+              <h2 style="color:#258356;">Candidate Address Verification</h2>
+              <div style="margin:26px 0 15px 0;">
+                <span style="color:#b40000;font-weight:700;">Error: </span>No token in URL.
+              </div>
+            </div>`;
+          return;
+        }
+        // Fetch candidate data for this token
+        const res = await fetch(`http://localhost:3001/candidate/${token}`);
+        if (!res.ok) {
+          const errorData = await res.json();
+          if (res.status === 403 && errorData.error === 'Form already submitted') {
+            document.getElementById('content').innerHTML = `
+              <div class="veritrust-form-card" style="text-align:center;">
+                <h2 style="color:#258356;">Candidate Address Verification</h2>
+                <div style="margin:26px 0 15px 0;">
+                  <span style="color:#b40000;font-weight:700;">This verification link has expired. Form already submitted.</span>
+                </div>
+              </div>`;
+          } else {
+            document.getElementById('content').innerHTML = `
+              <div class="veritrust-form-card" style="text-align:center;">
+                <h2 style="color:#258356;">Candidate Address Verification</h2>
+                <div style="margin:26px 0 15px 0;">
+                  <span style="color:#b40000;font-weight:700;">Error: </span>Candidate not found or invalid link.
+                </div>
+              </div>`;
+          }
+          return;
+        }
+        const data = await res.json();
+
+        // Show login form
+        document.getElementById('content').innerHTML = `
+          <div class="veritrust-form-card veritrust-login-card">
+            <h2 style="color:#258356; text-align:center;">Candidate Address Verification</h2>
+            <label class="veritrust-label">Username (First Name, ALL CAPS):</label>
+            <input type="text" id="username" autocomplete="off"/>
+            <label class="veritrust-label">Password (Phone Number):</label>
+            <input type="password" id="password" autocomplete="off"/>
+            <button onclick="handleLogin()">Login</button>
+            <div id="authError" style="color:red;margin-top:8px;text-align:center;"></div>
+          </div>
+        `;
+
+        window.handleLogin = function() {
+          const username = document.getElementById('username').value.trim();
+          const password = document.getElementById('password').value.trim();
+          const candidateFirstName = data.candidateName.split(' ')[0].toUpperCase();
+          if (
+            username === candidateFirstName &&
+            password === data.phoneNumber
+          ) {
+            // Auth successful: Show full modern form!
+            document.getElementById('content').innerHTML = `
+              <div class="veritrust-form-card">
+                <div style="text-align:center;margin-bottom:16px;">
+                  <img src="WhatsApp Image 2025-05-22 at 12.56.35_91608a0c.jpg" alt="Veritrust Logo" class="veritrust-logo" />
+                  <div class="veritrust-title">VERITRUST</div>
+                  <div class="veritrust-subtitle">Address Verification Form</div>
+                </div>
+                <form id="verificationForm" autocomplete="off">
+                  <div class="veritrust-row">
+                    <div class="veritrust-label">Client Name</div>
+                    <div class="veritrust-value">${data.clientName}</div>
+                  </div>
+                  <div class="veritrust-row">
+                    <div class="veritrust-label">Sub Client Name</div>
+                    <div class="veritrust-value">${data.subClientName}</div>
+                  </div>
+                  <div class="veritrust-row">
+                    <div class="veritrust-label">Candidate Name</div>
+                    <div class="veritrust-value">${data.candidateName}</div>
+                  </div>
+                  <div class="veritrust-row">
+                    <div class="veritrust-label">Employee ID</div>
+                    <div class="veritrust-value">${data.employeeId}</div>
+                  </div>
+                  <div class="veritrust-row">
+                    <div class="veritrust-label">Phone Number</div>
+                    <div class="veritrust-value">${data.phoneNumber}</div>
+                  </div>
+                  <div class="veritrust-row">
+                    <div class="veritrust-label">Alternate Phone Number</div>
+                    <div class="veritrust-value">${data.alternatePhone}</div>
+                  </div>
+                  <div class="veritrust-row">
+                    <div class="veritrust-label">Address</div>
+                    <div class="veritrust-value">${data.address}</div>
+                  </div>
+                  <div class="veritrust-row">
+                    <div class="veritrust-label">Pincode</div>
+                    <div class="veritrust-value">${data.pincode}</div>
+                  </div>
+                  <div class="veritrust-row">
+                    <div class="veritrust-label">Area Name</div>
+                    <div class="veritrust-value">${data.areaName}</div>
+                  </div>
+                  <div class="veritrust-row">
+                    <div class="veritrust-label">City</div>
+                    <div class="veritrust-value">${data.city}</div>
+                  </div>
+                  <div class="veritrust-row">
+                    <div class="veritrust-label">State</div>
+                    <div class="veritrust-value">${data.state}</div>
+                  </div>
+                  <hr class="veritrust-hr">
+
+                  <div class="veritrust-field">
+                    <label>POS Start Date</label>
+                    <input type="date" name="pos_start_date" required />
+                  </div>
+                  <div class="veritrust-field">
+                    <label>POS End Date</label>
+                    <input type="date" name="pos_end_date" required />
+                  </div>
+                  <div class="veritrust-field">
+                    <label>Resident Type</label>
+                    <select name="resident_type" required>
+                      <option value="">Select</option>
+                      <option>Company Provided</option>
+                      <option>Govt Quarter</option>
+                      <option>Owned</option>
+                      <option>PG</option>
+                      <option>Relative Owned</option>
+                      <option>Rented</option>
+                      <option>Other</option>
+                    </select>
+                  </div>
+                  <div class="veritrust-field">
+                    <label>Relationship With Respondent</label>
+                    <select name="relationship_with_respondent" required>
+                      <option value="">Select</option>
+                      <option>Self</option>
+                      <option>Brother</option>
+                      <option>Brother in Law</option>
+                      <option>Care Taker</option>
+                      <option>Cousin</option>
+                      <option>Father</option>
+                      <option>Father in Law</option>
+                      <option>Grand Father</option>
+                      <option>Grand mother</option>
+                      <option>Husband</option>
+                      <option>Owner</option>
+                      <option>Neighbour</option>
+                      <option>Sister</option>
+                      <option>Sister In law</option>
+                      <option>Tenant</option>
+                      <option>Spouse</option>
+                      <option>Aunty</option>
+                    </select>
+                  </div>
+                  <div class="veritrust-field">
+                    <label>Type of ID</label>
+                    <select name="type_of_id" required>
+                      <option value="">Select</option>
+                      <option>PAN</option>
+                      <option>Aadhar</option>
+                      <option>Driving Lic</option>
+                      <option>Voter Id</option>
+                      <option>RC</option>
+                    </select>
+                  </div>
+                  <div class="veritrust-photos">
+                    <div><b>Upload Photos (with GPS & Timestamp):</b></div>
+                    ${[1,2,3,4,5,6].map(i => `
+                    <div class="veritrust-photo-block">
+                      <label>${i}. ${[
+                        "Govt ID Proof", "House Photo", "Name Plate", "Street Photo", "Nearest Landmark", "Cross Display Board"
+                      ][i-1]}:</label>
+                      <input type="file" accept="image/*" capture="environment" onchange="handlePhoto(this,${i})" required>
+                      <img id="img-preview-${i}" class="veritrust-img-preview" style="display:none;"/>
+                      <div id="meta-${i}" class="meta-info"></div>
+                    </div>`).join('')}
+                  </div>
+                  <hr class="veritrust-hr">
+                  <div class="veritrust-disclaimer">
+                    <input type="checkbox" id="disclaimer" required />
+                    <label for="disclaimer">
+                      <b>Disclaimer:</b> I declare that all information and documents provided are true and correct to the best of my knowledge. I understand that incorrect or misleading information may lead to rejection or legal action.
+                    </label>
+                  </div>
+                  <button type="submit" id="submitBtn" disabled>Submit</button>
+                </form>
+                <div id="submitMsg" style="margin-top:16px;"></div>
+              </div>
+            `;
+
+            // Photo preview & GPS
+            window.handlePhoto = function(input, idx) {
+              const img = document.getElementById('img-preview-' + idx);
+              if (input.files && input.files[0]) {
+                const reader = new FileReader();
+                reader.onload = function(e) {
+                  img.src = e.target.result;
+                  img.style.display = 'block';
+                };
+                reader.readAsDataURL(input.files[0]);
+                if (navigator.geolocation) {
+                  navigator.geolocation.getCurrentPosition(
+                    (position) => {
+                      const lat = position.coords.latitude.toFixed(6);
+                      const lon = position.coords.longitude.toFixed(6);
+                      const dt = new Date().toLocaleString();
+                      document.getElementById('meta-' + idx).innerHTML =
+                        `<b>GPS:</b> ${lat}, ${lon} &nbsp; <b>Date/Time:</b> ${dt}`;
+                    },
+                    (err) => {
+                      document.getElementById('meta-' + idx).innerHTML = `<span style="color:#ad1f2a;">Location not allowed</span>`;
+                    }
+                  );
+                } else {
+                  document.getElementById('meta-' + idx).innerHTML = `<span style="color:#ad1f2a;">Geolocation not supported</span>`;
+                }
+              } else {
+                img.style.display = 'none';
+                document.getElementById('meta-' + idx).innerHTML = '';
+              }
+            };
+            // Disclaimer checkbox logic
+            document.getElementById('disclaimer').onchange = function() {
+              document.getElementById('submitBtn').disabled = !this.checked;
+            };
+            // Submit handler
+            document.getElementById('verificationForm').onsubmit = async function(e) {
+              e.preventDefault();
+              document.getElementById('submitBtn').disabled = true;
+              document.getElementById('submitMsg').innerHTML = 'Submitting...';
+
+              // Collect all form data
+              const formEl = this;
+              const formData = new FormData(formEl);
+              // Add photos as base64
+              for(let i=1;i<=6;i++) {
+                const fileInput = formEl.querySelector(`input[type="file"]:nth-of-type(${i})`);
+                if(fileInput && fileInput.files.length>0) {
+                  const file = fileInput.files[0];
+                  const reader = new FileReader();
+                  // Wrap in a Promise to allow async base64
+                  formData[`photo${i}`] = await new Promise((resolve) => {
+                    reader.onload = function(e) { resolve(e.target.result); };
+                    reader.readAsDataURL(file);
+                  });
+                  formData[`meta${i}`] = document.getElementById('meta-'+i).innerText;
+                }
+              }
+              // Convert to JSON object
+              const json = {};
+              formData.forEach((value, key) => { json[key] = value; });
+              // Add photos/meta manually
+              for(let i=1;i<=6;i++) {
+                if(formData[`photo${i}`]) json[`photo${i}`] = formData[`photo${i}`];
+                if(formData[`meta${i}`]) json[`meta${i}`] = formData[`meta${i}`];
+              }
+              // Post to server
+              const token = getToken();
+              const resp = await fetch(`http://localhost:3001/submit/${token}`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify(json)
+              });
+              if(resp.ok) {
+                document.getElementById('submitMsg').innerHTML = '<span style="color:#168550;"><b>Form submitted successfully!</b> This link has now expired.</span>';
+                document.getElementById('verificationForm').remove();
+              } else {
+                const err = await resp.json();
+                document.getElementById('submitMsg').innerHTML = '<span style="color:red;">Error submitting form: '+(err.error||"Unknown error")+'</span>';
+                document.getElementById('submitBtn').disabled = false;
+              }
+            };
+          } else {
+            document.getElementById('authError').innerText = "Invalid login. Please try again.";
+          }
+        };
+      }
+      main();
+    </script>
+  </body>
+</html>
