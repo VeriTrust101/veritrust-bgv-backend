@@ -13,7 +13,7 @@ const path = require('path');
 // ───────────────────────────────────────────────────────────────────────────────
 
 // Replace this with your actual MongoDB Atlas connection string:
-const MONGODB_URI = 'mongodb+srv://veritrust:<YourPassword>@veritrust-cluster.cjmsmak.mongodb.net/veritrust?retryWrites=true&w=majority';
+const MONGODB_URI = 'mongodb+srv://veritrust:veritrust8800@veritrust-cluster.cjmsmak.mongodb.net/veritrust?retryWrites=true&w=majority';
 
 const PORT = process.env.PORT || 3001;
 const app = express();
