@@ -8,33 +8,31 @@ const XLSX = require('xlsx');
 const multer = require('multer');
 const path = require('path');
 
-// ───────────────────────────────────────────────────────────────────────────────
-// 1. CONFIGURATION
-// ───────────────────────────────────────────────────────────────────────────────
-
-// Replace this with your actual MongoDB Atlas connection string:
-const MONGODB_URI = 'mongodb+srv://veritrust:Veritrust8800@veritrust-cluster.cjmsmak.mongodb.net/veritrust?retryWrites=true&w=majority';
-
-const PORT = process.env.PORT || 3001;
 const app = express();
+const PORT = process.env.PORT || 3001;
 
-// Enable CORS for your Netlify frontend domain (and localhost if testing locally):
+// ─── 1. CORS & BODY PARSER SETUP ────────────────────────────────────────────────
+// Allow requests from your Netlify front–end (and localhost for local testing).
 app.use(
   cors({
     origin: [
-      'https://earnest-melomakarona-7cf1bf.netlify.app', // your Netlify site
-      'http://localhost:8000',                           // your local dev URL (if needed)
+      'https://earnest-melomakarona-7cf1bf.netlify.app', // your Netlify domain
+      'http://localhost:8000',                            // your local dev URL
     ],
   })
 );
 
-// Increase the JSON body size limit to 20 MB (so large base64 images don’t get rejected)
+// Increase the JSON payload limit so base64 images won’t be too large.
 app.use(express.json({ limit: '20mb' }));
 app.use(express.urlencoded({ limit: '20mb', extended: true }));
 
-// ───────────────────────────────────────────────────────────────────────────────
-// 2. MONGOOSE SCHEMA & MODEL
-// ───────────────────────────────────────────────────────────────────────────────
+// ─── 2. MONGODB / MONGOOSE SETUP ────────────────────────────────────────────────
+// Make sure you’ve set this in Render’s “Environment” → MONGODB_URI.
+const MONGODB_URI = process.env.MONGODB_URI;
+if (!MONGODB_URI) {
+  console.error('ERROR: MONGODB_URI environment variable is missing.');
+  process.exit(1);
+}
 
 mongoose
   .connect(MONGODB_URI, {
@@ -42,8 +40,12 @@ mongoose
     useUnifiedTopology: true,
   })
   .then(() => console.log('📦 MongoDB connected'))
-  .catch((err) => console.error('MongoDB connection error:', err));
+  .catch((err) => {
+    console.error('MongoDB connection error:', err);
+    process.exit(1);
+  });
 
+// ─── 3. DEFINE THE CANDIDATE SCHEMA ─────────────────────────────────────────────
 const candidateSchema = new mongoose.Schema({
   uniqueToken:        { type: String, required: true, unique: true },
   clientName:         { type: String, required: true },
@@ -62,7 +64,6 @@ const candidateSchema = new mongoose.Schema({
   residentType:       { type: String, required: true },
   relationshipWithRespondent: { type: String, required: true },
   typeOfID:           { type: String, required: true },
-  // Photos (base64) + metadata (GPS, timestamp)
   photo1:             { type: String },
   meta1:              { type: String },
   photo2:             { type: String },
@@ -78,78 +79,105 @@ const candidateSchema = new mongoose.Schema({
   status:             { type: String, enum: ['Pending', 'Submitted'], default: 'Pending' },
   submittedAt:        { type: Date },
 });
-
 const Candidate = mongoose.model('Candidate', candidateSchema);
 
-// ───────────────────────────────────────────────────────────────────────────────
-// 3. MULTER SETUP (for future file uploads, if needed) 
-//    (Right now we don’t store any files locally, so this is just placeholder.)
-// ───────────────────────────────────────────────────────────────────────────────
-
+// ─── 4. MULTER SETUP (for Excel upload) ─────────────────────────────────────────
 const upload = multer({
-  storage: multer.memoryStorage(), // we’re not saving raw files to disk here
+  storage: multer.memoryStorage(),
+  fileFilter: (req, file, cb) => {
+    // Only accept .xlsx or .xls files
+    const ext = path.extname(file.originalname).toLowerCase();
+    if (ext !== '.xlsx' && ext !== '.xls') {
+      return cb(new Error('Only .xlsx or .xls files are allowed'), false);
+    }
+    cb(null, true);
+  },
+  limits: {
+    fileSize: 5 * 1024 * 1024, // 5 MB max for the Excel file
+  },
 });
 
-// ───────────────────────────────────────────────────────────────────────────────
-// 4. ROUTES
-// ───────────────────────────────────────────────────────────────────────────────
-
-/**
- * Health-check endpoint
- */
+// ─── 5. HEALTH CHECK ─────────────────────────────────────────────────────────────
 app.get('/health', (req, res) => {
   return res.json({ status: 'OK' });
 });
 
-/**
- * 4.1 Upload Excel and Parse Candidates
- *     (This route is used by your Admin page to upload the Excel file.
- *      It reads each row, generates a unique token, saves to MongoDB, and returns an array of { candidateName, phoneNumber, uniqueLink }.)
- */
+// ─── 6. ADMIN: UPLOAD & PARSE EXCEL ─────────────────────────────────────────────
 app.post('/admin/upload-excel', upload.single('excelFile'), async (req, res) => {
   try {
     if (!req.file) {
       return res.status(400).json({ error: 'No file uploaded' });
     }
 
-    // Read the uploaded Excel buffer
+    // Read workbook from the uploaded buffer
     const workbook = XLSX.read(req.file.buffer, { type: 'buffer' });
     const sheetName = workbook.SheetNames[0];
     const worksheet = workbook.Sheets[sheetName];
     const rows = XLSX.utils.sheet_to_json(worksheet, { defval: '' });
 
+    // Expected column headers (must match exactly, including spaces/case):
+    const requiredHeaders = [
+      'Client Name',
+      'Sub Client Name',
+      'Candidate Name',
+      'Employee Id',
+      'phone number',
+      'Alternate phone number',
+      'address',
+      'pincode',
+      'Area Name',
+      'City',
+      'State',
+      'POS start date',
+      'POS end Date',
+      'Resident Type',
+      'Relationship With Respondent',
+      'Type of ID',
+    ];
+
+    // Check the first row’s keys for missing headers
+    if (rows.length === 0) {
+      return res.status(400).json({ error: 'Excel file is empty' });
+    }
+    const firstRowKeys = Object.keys(rows[0]);
+    for (let header of requiredHeaders) {
+      if (!firstRowKeys.includes(header)) {
+        return res.status(400).json({ error: `Missing required header: "${header}"` });
+      }
+    }
+
     const results = [];
 
     for (let row of rows) {
-      // Generate a unique token for each candidate
+      // Generate a unique token
       const uniqueToken = uuidv4();
 
-      // Create a new Candidate document
+      // Create and save the new candidate
       const candidate = new Candidate({
         uniqueToken: uniqueToken,
-        clientName: row['Client Name'] || '',
-        subClientName: row['Sub Client Name'] || '',
-        candidateName: row['Candidate Name'] || '',
-        employeeId: row['Employee Id'] || '',
-        phoneNumber: row['phone number'] || '',
-        alternatePhone: row['Alternate phone number'] || '',
-        address: row['address'] || '',
-        pincode: row['pincode'] || '',
-        areaName: row['Area Name'] || '',
-        city: row['City'] || '',
-        state: row['State'] || '',
-        posStartDate: row['POS start date'] || '',
-        posEndDate: row['POS end Date'] || '',
-        residentType: row['Resident Type'] || '',
-        relationshipWithRespondent: row['Relationship With Respondent'] || '',
-        typeOfID: row['Type of ID'] || '',
+        clientName: row['Client Name'].toString(),
+        subClientName: row['Sub Client Name'].toString(),
+        candidateName: row['Candidate Name'].toString(),
+        employeeId: row['Employee Id'].toString(),
+        phoneNumber: row['phone number'].toString(),
+        alternatePhone: row['Alternate phone number'].toString(),
+        address: row['address'].toString(),
+        pincode: row['pincode'].toString(),
+        areaName: row['Area Name'].toString(),
+        city: row['City'].toString(),
+        state: row['State'].toString(),
+        posStartDate: row['POS start date'].toString(),
+        posEndDate: row['POS end Date'].toString(),
+        residentType: row['Resident Type'].toString(),
+        relationshipWithRespondent: row['Relationship With Respondent'].toString(),
+        typeOfID: row['Type of ID'].toString(),
         status: 'Pending',
       });
 
       await candidate.save();
 
-      // The unique link that gets sent to each candidate:
-      const uniqueLink = `https://<YOUR_NETLIFY_DOMAIN>/candidate-verify.html?token=${uniqueToken}`;
+      // Build the unique link (pointing to your Netlify front end)
+      const uniqueLink = `https://earnest-melomakarona-7cf1bf.netlify.app/candidate-verify.html?token=${uniqueToken}`;
 
       results.push({
         candidateName: candidate.candidateName,
@@ -161,13 +189,18 @@ app.post('/admin/upload-excel', upload.single('excelFile'), async (req, res) => 
     return res.json({ message: 'Upload successful', candidates: results });
   } catch (err) {
     console.error('Error in /admin/upload-excel:', err);
+    // If multer threw an error (e.g. wrong file type), send its message:
+    if (err.message && err.message.startsWith('Only .xlsx')) {
+      return res.status(400).json({ error: err.message });
+    }
+    if (err.message && err.message.includes('Unexpected')) {
+      return res.status(400).json({ error: 'Failed to parse Excel. Please ensure the file is a valid .xlsx.' });
+    }
     return res.status(500).json({ error: 'Failed to process Excel file' });
   }
 });
 
-/**
- * 4.2 Get Candidate by Token (for prefill & authentication)
- */
+// ─── 7. GET CANDIDATE BY TOKEN (for prefill) ────────────────────────────────────
 app.get('/candidate/:token', async (req, res) => {
   try {
     const candidate = await Candidate.findOne({ uniqueToken: req.params.token });
@@ -181,22 +214,18 @@ app.get('/candidate/:token', async (req, res) => {
   }
 });
 
-/**
- * 4.3 Submit Candidate Form (with all fields + 6 photos)
- */
+// ─── 8. SUBMIT CANDIDATE FORM (with photos) ─────────────────────────────────────
 app.post('/submit/:token', async (req, res) => {
   try {
     const candidate = await Candidate.findOne({ uniqueToken: req.params.token });
     if (!candidate) {
       return res.status(404).json({ error: 'Candidate not found' });
     }
-
-    // Prevent double submission
     if (candidate.status === 'Submitted') {
       return res.status(400).json({ error: 'Form already submitted' });
     }
 
-    // Update all prefilled fields (in case you allow edits, otherwise these can be omitted)
+    // Update all fields (prefilled + dropdown + photos)
     candidate.clientName = req.body.clientName;
     candidate.subClientName = req.body.subClientName;
     candidate.candidateName = req.body.candidateName;
@@ -214,7 +243,7 @@ app.post('/submit/:token', async (req, res) => {
     candidate.relationshipWithRespondent = req.body.relationshipWithRespondent;
     candidate.typeOfID = req.body.typeOfID;
 
-    // Attach all six base64-encoded photos + their GPS/timestamp metadata
+    // Attach the six photos + metadata
     for (let i = 1; i <= 6; i++) {
       candidate['photo' + i] = req.body['photo' + i];
       candidate['meta' + i] = req.body['meta' + i];
@@ -222,8 +251,8 @@ app.post('/submit/:token', async (req, res) => {
 
     candidate.status = 'Submitted';
     candidate.submittedAt = new Date();
-
     await candidate.save();
+
     return res.json({ message: 'Submission saved' });
   } catch (err) {
     console.error('Error in POST /submit/:token:', err);
@@ -231,9 +260,7 @@ app.post('/submit/:token', async (req, res) => {
   }
 });
 
-// ───────────────────────────────────────────────────────────────────────────────
-// 5. START THE SERVER
-// ───────────────────────────────────────────────────────────────────────────────
+// ─── 9. START THE SERVER ─────────────────────────────────────────────────────────
 app.listen(PORT, () => {
   console.log(`🚀 Server running on http://0.0.0.0:${PORT}`);
 });
